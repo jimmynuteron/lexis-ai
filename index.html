@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexis AI — Custom Neural Network</title>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --bg-grad: radial-gradient(circle at 15% 10%, rgba(59, 130, 246, 0.14), transparent 45%),
+                 radial-gradient(circle at 85% 90%, rgba(139, 92, 246, 0.12), transparent 45%);
+      --surface: #121826;
+      --surface-2: #1a2234;
+      --border: #263147;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --accent-2: #8b5cf6;
+      --accent-grad: linear-gradient(135deg, #3b82f6, #6366f1);
+      --user-bg: linear-gradient(135deg, #2563eb, #4f46e5);
+      --code-bg: #0d1117;
+      --code-head: #161b22;
+      --ok-bg: rgba(16, 185, 129, 0.14);
+      --ok-border: rgba(16, 185, 129, 0.35);
+      --ok-text: #34d399;
+      --warn-bg: rgba(245, 158, 11, 0.14);
+      --warn-border: rgba(245, 158, 11, 0.35);
+      --warn-text: #fbbf24;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      --radius: 14px;
+    }
+
+    html[data-theme="light"] {
+      --bg: #f4f7fb;
+      --bg-grad: radial-gradient(circle at 15% 10%, rgba(37, 99, 235, 0.08), transparent 45%),
+                 radial-gradient(circle at 85% 90%, rgba(99, 102, 241, 0.07), transparent 45%);
+      --surface: #ffffff;
+      --surface-2: #eef2f8;
+      --border: #d8e1ee;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --accent-2: #4f46e5;
+      --accent-grad: linear-gradient(135deg, #2563eb, #4f46e5);
+      --user-bg: linear-gradient(135deg, #2563eb, #4f46e5);
+      --code-bg: #0f172a;
+      --code-head: #1e293b;
+      --ok-bg: #ecfdf5;
+      --ok-border: #a7f3d0;
+      --ok-text: #047857;
+      --warn-bg: #fffbeb;
+      --warn-border: #fde68a;
+      --warn-text: #b45309;
+      --shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      background-image: var(--bg-grad);
+      color: var(--text);
+      height: 100vh;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+
+    .brand { display: flex; align-items: center; gap: 12px; }
+
+    .brand-badge {
+      width: 38px; height: 38px; border-radius: 11px;
+      background: var(--accent-grad); color: #fff; font-weight: 800;
+      display: flex; align-items: center; justify-content: center; font-size: 18px;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+    }
+
+    .brand h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
+    .brand p { font-size: 12px; color: var(--muted); }
+
+    .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+    .status-pill {
+      font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px;
+      background: var(--warn-bg); border: 1px solid var(--warn-border); color: var(--warn-text);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%; background: currentColor;
+    }
+
+    .status-pill.ready {
+      background: var(--ok-bg); border-color: var(--ok-border); color: var(--ok-text);
+    }
+
+    .btn {
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      padding: 7px 12px; border-radius: 9px; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: transform 0.1s ease, border-color 0.15s ease, background 0.15s ease;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn:active { transform: scale(0.98); }
+
+    .btn-primary {
+      background: var(--accent-grad); border: none; color: #fff;
+      padding: 10px 18px; font-size: 13px;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+
+    .layout { display: flex; flex: 1; min-height: 0; }
+
+    aside {
+      width: 280px; background: var(--surface); border-right: 1px solid var(--border);
+      padding: 18px; display: flex; flex-direction: column; gap: 18px;
+      overflow-y: auto; flex-shrink: 0;
+    }
+
+    .side-section h2 {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 10px;
+    }
+
+    .spec-card {
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: 11px; padding: 12px; display: flex; flex-direction: column; gap: 8px;
+    }
+
+    .spec-row {
+      display: flex; justify-content: space-between; font-size: 12px;
+    }
+    .spec-row span:first-child { color: var(--muted); }
+    .spec-row span:last-child { font-weight: 600; }
+
+    .side-btn {
+      width: 100%; text-align: left; padding: 9px 11px; margin-bottom: 7px;
+      border-radius: 9px; border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text); font-size: 12.5px; font-weight: 500; cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.1s ease;
+    }
+    .side-btn:hover { border-color: var(--accent); transform: translateX(2px); }
+
+    .tag {
+      display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px;
+      border-radius: 5px; margin-right: 6px; background: rgba(59, 130, 246, 0.16); color: #60a5fa;
+    }
+    html[data-theme="light"] .tag { color: #1d4ed8; }
+
+    main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+    #chatLog {
+      flex: 1; overflow-y: auto; padding: 24px;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+
+    .msg {
+      max-width: 800px; width: fit-content; padding: 14px 17px;
+      border-radius: var(--radius); line-height: 1.55; font-size: 14px;
+      word-wrap: break-word; white-space: pre-wrap; box-shadow: var(--shadow);
+    }
+
+    .msg.user {
+      align-self: flex-end; background: var(--user-bg); color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .msg.bot {
+      align-self: flex-start; background: var(--surface);
+      border: 1px solid var(--border); border-bottom-left-radius: 4px;
+      width: 100%; max-width: 800px;
+    }
+
+    .msg-head {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 6px; gap: 10px;
+    }
+
+    .msg-role {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.05em; opacity: 0.75;
+    }
+
+    .msg-meta {
+      font-size: 11px; color: var(--muted);
+    }
+
+    .code-card {
+      margin-top: 12px; border-radius: 11px; overflow: hidden;
+      border: 1px solid #30363d; background: var(--code-bg); white-space: normal;
+    }
+
+    .code-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 13px; background: var(--code-head); color: #cbd5e1;
+      font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .code-actions { display: flex; gap: 7px; }
+
+    .code-btn {
+      border: 1px solid #3d4758; background: #242c3a; color: #e2e8f0;
+      padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;
+    }
+    .code-btn:hover { background: #334155; }
+
+    pre {
+      margin: 0; padding: 13px; overflow-x: auto; color: #e6edf3;
+      font-size: 13px; line-height: 1.5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .composer {
+      background: var(--surface); border-top: 1px solid var(--border);
+      padding: 14px 22px; display: flex; gap: 10px; align-items: flex-end; flex-shrink: 0;
+    }
+
+    textarea {
+      flex: 1; resize: none; border: 1px solid var(--border); border-radius: 11px;
+      padding: 11px 14px; font-family: inherit; font-size: 14px;
+      background: var(--surface-2); color: var(--text);
+      min-height: 44px; max-height: 140px; outline: none;
+    }
+    textarea:focus { border-color: var(--accent); }
+
+    .toast {
+      position: fixed; bottom: 84px; right: 22px; background: var(--accent-grad); color: #fff;
+      padding: 9px 15px; border-radius: 9px; font-size: 13px; font-weight: 600;
+      opacity: 0; pointer-events: none; transition: opacity 0.2s ease; box-shadow: var(--shadow);
+    }
+    .toast.show { opacity: 1; }
+
+    .mobile-menu-btn { display: none; }
+
+    @media (max-width: 820px) {
+      .mobile-menu-btn { display: inline-flex; align-items: center; }
+      header { padding: 10px 14px; flex-wrap: wrap; }
+      .brand p { display: none; }
+      aside {
+        position: fixed;
+        top: 60px;
+        left: 0;
+        bottom: 0;
+        z-index: 50;
+        width: 270px;
+        transform: translateX(-105%);
+        transition: transform 0.22s ease;
+        box-shadow: var(--shadow);
+      }
+      aside.open { transform: translateX(0); }
+      #chatLog { padding: 12px; }
+      .composer { padding: 10px 12px; }
+      textarea { font-size: 16px; }
+      .btn { padding: 8px 11px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-badge">L</div>
+      <div>
+        <h1>Lexis AI</h1>
+        <p>Custom-Built Transformer · English, Facts &amp; Code</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn mobile-menu-btn" id="menuBtn" type="button">Prompts</button>
+      <span class="status-pill" id="statusPill"><span class="status-dot"></span><span id="statusText">Loading Model...</span></span>
+      <button class="btn" id="themeBtn" type="button">Light Mode</button>
+      <button class="btn" id="forgetMemBtn" type="button">Clear Memory</button>
+      <button class="btn" id="clearChatBtn" type="button">New Chat</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside>
+      <div class="side-section">
+        <h2>Neural Architecture</h2>
+        <div class="spec-card">
+          <div class="spec-row"><span>Model</span><span>LexisLM v2</span></div>
+          <div class="spec-row"><span>Base</span><span>100% Custom</span></div>
+          <div class="spec-row"><span>Architecture</span><span>6L · 6H · 384d</span></div>
+          <div class="spec-row"><span>Tokenizer</span><span>Custom BPE (4K)</span></div>
+          <div class="spec-row"><span>Saved Memory</span><span id="memCount">0 facts</span></div>
+        </div>
+      </div>
+
+      <div class="side-section">
+        <h2>Showcase Prompts</h2>
+        <button class="side-btn prompt-btn" type="button" data-prompt="What does the word 'abundant' mean?"><span class="tag">VOCAB</span>Define 'abundant'</button>
+        <button class="side-btn prompt-btn" type="button" data-prompt="Fix the grammar in this sentence: She don't like coffee."><span class="tag">GRAMMAR</span>Fix grammar error</button>
+        <button class="side-btn prompt-btn" type="button" data-prompt="What is the capital of Japan?"><span class="tag">FACTS</span>Capital of Japan</button>
+        <button class="side-btn prompt-btn" type="button" data-prompt="Write a Luau script (.luau) that prints a welcome message when a player joins a Roblox game."><span class="tag">.LUAU</span>Roblox welcome script</button>
+        <button class="side-btn prompt-btn" type="button" data-prompt="Make me a full Roblox obby right now."><span class="tag">.LUAU</span>Full Roblox Obby</button>
+        <button class="side-btn prompt-btn" type="button" data-prompt="Write a Python (.py) function to check if a word is a palindrome."><span class="tag">.PY</span>Palindrome checker</button>
+        <button class="side-btn prompt-btn" type="button" data-prompt="Write an Arduino (.ino) sketch to blink the built-in LED every second."><span class="tag">.INO</span>Blink LED sketch</button>
+      </div>
+    </aside>
+
+    <main>
+      <div id="chatLog" aria-live="polite"></div>
+
+      <form class="composer" id="chatForm">
+        <textarea
+          id="userInput"
+          rows="1"
+          placeholder="Ask Lexis about English, facts, or .luau / .py / .ino code..."
+          aria-label="Message input"
+        ></textarea>
+        <button class="btn btn-primary" id="sendBtn" type="submit">Send</button>
+      </form>
+    </main>
+  </div>
+
+  <div class="toast" id="toast">Copied</div>
+
+  <script>
+    const chatLog = document.getElementById("chatLog");
+    const chatForm = document.getElementById("chatForm");
+    const userInput = document.getElementById("userInput");
+    const sendBtn = document.getElementById("sendBtn");
+    const clearChatBtn = document.getElementById("clearChatBtn");
+    const forgetMemBtn = document.getElementById("forgetMemBtn");
+    const themeBtn = document.getElementById("themeBtn");
+    const statusPill = document.getElementById("statusPill");
+    const statusText = document.getElementById("statusText");
+    const memCount = document.getElementById("memCount");
+    const toast = document.getElementById("toast");
+
+    const SHORT_SYSTEM_TAG = "Birthmother";
+    const MAX_SEQ_LEN = 512;
+    const MAX_NEW_TOKENS = 360;
+    const MEMORY_KEY = "birthmother_user_memory_v1";
+
+    let tokenizer = null;
+    let session = null;
+    let modelReady = false;
+    let history = [];
+
+    function showToast(text) {
+      toast.textContent = text;
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 1800);
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => showToast("Code copied!")).catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+
+    function fallbackCopy(text) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); showToast("Code copied!"); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+
+    function downloadFile(filename, content) {
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast("Downloaded " + filename);
+    }
+
+    class BrowserBPETokenizer {
+      constructor(data) {
+        this.specialTokens = data.special_tokens;
+        this.vocab = data.vocab;
+        this.tokenToId = new Map();
+        this.vocab.forEach((t, i) => this.tokenToId.set(t, i));
+        this.mergeRanks = new Map();
+        data.merges.forEach((pair, idx) => {
+          this.mergeRanks.set(pair[0] + "\u0000" + pair[1], idx);
+        });
+        this.pat = /\s?\S+|\s+/g;
+      }
+
+      get bosId() { return this.tokenToId.get("<|bos|>"); }
+      get eosId() { return this.tokenToId.get("<|eos|>"); }
+
+      bpeWord(word) {
+        let syms = Array.from(word);
+        if (syms.length <= 1) return syms;
+        while (true) {
+          let bestRank = Infinity;
+          let bestIdx = -1;
+          for (let i = 0; i < syms.length - 1; i++) {
+            const rank = this.mergeRanks.get(syms[i] + "\u0000" + syms[i + 1]);
+            if (rank !== undefined && rank < bestRank) {
+              bestRank = rank;
+              bestIdx = i;
+            }
+          }
+          if (bestIdx === -1) break;
+          syms.splice(bestIdx, 2, syms[bestIdx] + syms[bestIdx + 1]);
+        }
+        return syms;
+      }
+
+      encodeText(text) {
+        const ids = [];
+        const chunks = text.match(this.pat) || [];
+        for (const chunk of chunks) {
+          for (const tok of this.bpeWord(chunk)) {
+            if (this.tokenToId.has(tok)) {
+              ids.push(this.tokenToId.get(tok));
+            } else {
+              for (const ch of tok) {
+                if (this.tokenToId.has(ch)) ids.push(this.tokenToId.get(ch));
+              }
+            }
+          }
+        }
+        return ids;
+      }
+
+      encodePrompt(sysTag, hist) {
+        const ids = [this.bosId, this.tokenToId.get("<|system|>")];
+        ids.push(...this.encodeText(sysTag));
+        for (const [role, content] of hist) {
+          const roleTok = role === "user" ? "<|user|>" : "<|assistant|>";
+          ids.push(this.tokenToId.get(roleTok));
+          ids.push(...this.encodeText(content));
+          if (role === "assistant") ids.push(this.eosId);
+        }
+        ids.push(this.tokenToId.get("<|assistant|>"));
+        return ids;
+      }
+
+      decode(ids) {
+        const specialSet = new Set(this.specialTokens);
+        let out = "";
+        for (const id of ids) {
+          const tok = this.vocab[id] || "";
+          if (!specialSet.has(tok)) out += tok;
+        }
+        return out.trim();
+      }
+    }
+
+    function loadMemories() {
+      try {
+        const raw = localStorage.getItem(MEMORY_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        memCount.textContent = arr.length + (arr.length === 1 ? " fact" : " facts");
+        return arr;
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveMemories(mems) {
+      try { localStorage.setItem(MEMORY_KEY, JSON.stringify(mems)); } catch (e) {}
+      memCount.textContent = mems.length + (mems.length === 1 ? " fact" : " facts");
+    }
+
+    function extractMemory(text) {
+      const m = text.match(/\bmy name is ([A-Za-z0-9 _'-]{1,40})/i);
+      if (m) return "The user's name is " + m[1].trim().replace(/[.!?]+$/, "") + ".";
+      if (text.toLowerCase().startsWith("remember ")) {
+        const note = text.slice(9).trim().replace(/[.!?]+$/, "");
+        if (note) return "User note: " + note + ".";
+      }
+      return null;
+    }
+
+    function renderMessageContent(container, text) {
+      const fenceRegex = /```(\w+)?\n([\s\S]*?)```/g;
+      let lastIndex = 0;
+      let match;
+
+      while ((match = fenceRegex.exec(text)) !== null) {
+        if (match.index > lastIndex) {
+          const p = document.createElement("div");
+          p.textContent = text.slice(lastIndex, match.index).trim();
+          if (p.textContent) container.appendChild(p);
+        }
+
+        const lang = (match[1] || "txt").toLowerCase();
+        const code = match[2].replace(/\n$/, "");
+        const extMap = { luau: "luau", lua: "luau", python: "py", py: "py", ino: "ino", cpp: "ino", c: "ino" };
+        const ext = extMap[lang] || "txt";
+        const filename = "birthmother_script." + ext;
+
+        const codeCard = document.createElement("div");
+        codeCard.className = "code-card";
+
+        const header = document.createElement("div");
+        header.className = "code-header";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = filename;
+        header.appendChild(nameSpan);
+
+        const actions = document.createElement("div");
+        actions.className = "code-actions";
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "code-btn";
+        copyBtn.textContent = "Copy Code";
+        copyBtn.addEventListener("click", () => copyText(code));
+
+        const dlBtn = document.createElement("button");
+        dlBtn.type = "button";
+        dlBtn.className = "code-btn";
+        dlBtn.textContent = "Download ." + ext;
+        dlBtn.addEventListener("click", () => downloadFile(filename, code));
+
+        actions.appendChild(copyBtn);
+        actions.appendChild(dlBtn);
+        header.appendChild(actions);
+
+        const pre = document.createElement("pre");
+        const codeEl = document.createElement("code");
+        codeEl.textContent = code;
+        pre.appendChild(codeEl);
+
+        codeCard.appendChild(header);
+        codeCard.appendChild(pre);
+        container.appendChild(codeCard);
+
+        lastIndex = fenceRegex.lastIndex;
+      }
+
+      if (lastIndex < text.length) {
+        const tail = document.createElement("div");
+        tail.textContent = text.slice(lastIndex).trim();
+        if (tail.textContent) container.appendChild(tail);
+      }
+    }
+
+    function appendMessage(role, text, metaText = "") {
+      const card = document.createElement("div");
+      card.className = "msg " + (role === "user" ? "user" : "bot");
+
+      const head = document.createElement("div");
+      head.className = "msg-head";
+
+      const label = document.createElement("div");
+      label.className = "msg-role";
+      label.textContent = role === "user" ? "You" : "Lexis";
+      head.appendChild(label);
+
+      if (metaText) {
+        const meta = document.createElement("div");
+        meta.className = "msg-meta";
+        meta.textContent = metaText;
+        head.appendChild(meta);
+      }
+      card.appendChild(head);
+
+      const body = document.createElement("div");
+      if (role === "bot") {
+        renderMessageContent(body, text);
+      } else {
+        body.textContent = text;
+      }
+      card.appendChild(body);
+
+      chatLog.appendChild(card);
+      chatLog.scrollTop = chatLog.scrollHeight;
+      return card;
+    }
+
+
+    let kbEntries = [];
+
+    function ngrams(text) {
+      const cleaned = text.toLowerCase().replace(/[^a-z0-9\s]/g, " ").trim();
+      const words = cleaned ? cleaned.split(/\s+/) : [];
+      const map = new Map();
+      for (const w of words) {
+        map.set(w, (map.get(w) || 0) + 1);
+        if (w.length >= 3) {
+          for (let i = 0; i <= w.length - 3; i++) {
+            const g = w.slice(i, i + 3);
+            map.set(g, (map.get(g) || 0) + 0.5);
+          }
+        }
+      }
+      return map;
+    }
+
+    function buildKBFromJsonl(jsonlText) {
+      const seen = new Set();
+      kbEntries = [];
+      for (const line of jsonlText.split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        try {
+          const msgs = JSON.parse(line).messages || [];
+          for (let i = 0; i < msgs.length - 1; i++) {
+            if (msgs[i].role === "user" && msgs[i + 1].role === "assistant") {
+              const q = msgs[i].content.trim();
+              const a = msgs[i + 1].content.trim();
+              if (q && a && !seen.has(q)) {
+                seen.add(q);
+                const vec = ngrams(q);
+                let sq = 0;
+                for (const v of vec.values()) sq += v * v;
+                kbEntries.push({ q, a, vec, norm: Math.sqrt(sq) || 1 });
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    function searchKB(query) {
+      const low = query.toLowerCase().replace(/[^a-z0-9.\s']/g, "").trim();
+      if (["hi", "hello", "hey", "yo", "sup", "hola"].includes(low)) {
+        return "Hello! I'm Lexis. Ask me about English grammar, vocabulary, school facts, or .luau / .py / .ino code!";
+      }
+      if (low === "grammar" || low === "english grammar") {
+        return "In English grammar, the 8 parts of speech are nouns, pronouns, verbs, adjectives, adverbs, prepositions, conjunctions, and interjections. Ask me about any of them or paste a sentence to fix!";
+      }
+      if (["vocabulary", "vocab", "words"].includes(low)) {
+        return "'Abundant' (adjective) means existing in large quantities; plentiful. Synonyms: plentiful, ample. Example: The region has abundant rainfall during the spring.";
+      }
+      if (low.includes("school fact") || ["facts", "cool facts", "fact"].includes(low)) {
+        return "Here is a cool science fact: Light travels in a vacuum at 299,792,458 meters per second—and a photon from the Sun takes about 8 minutes and 20 seconds to reach Earth!";
+      }
+
+      if (!kbEntries.length) return null;
+
+      const qVec = ngrams(query);
+      let qSq = 0;
+      for (const v of qVec.values()) qSq += v * v;
+      const qNorm = Math.sqrt(qSq) || 1;
+
+      let bestQ = null, bestA = null, bestScore = 0;
+      for (const item of kbEntries) {
+        let dot = 0;
+        for (const [k, val] of qVec.entries()) {
+          if (item.vec.has(k)) dot += val * item.vec.get(k);
+        }
+        const score = dot / (qNorm * item.norm);
+        if (score > bestScore) {
+          bestScore = score;
+          bestQ = item.q;
+          bestA = item.a;
+        }
+      }
+
+      const mDef = low.match(/(?:what does|define)\s+['"]?([a-z]+)['"]?/);
+      if (mDef && bestQ) {
+        const w = mDef[1];
+        if (!["the", "word", "this", "that"].includes(w) && !bestQ.toLowerCase().includes(w)) {
+          bestA = null;
+          bestScore = 0;
+        }
+      }
+
+      const isCoding = [".luau", "luau", "obby", ".py", "python", ".ino", "arduino"].some((k) => low.includes(k));
+      if (bestA && bestScore >= (isCoding ? 0.48 : 0.60)) {
+        return bestA.replace("I'm Birthmother", "I'm Lexis");
+      }
+
+      for (const [ext, kw] of [["obby", "obby"], [".luau", "luau"], [".py", "python"], [".ino", "arduino"]]) {
+        if (low.includes(ext)) {
+          const matches = kbEntries.filter((e) => e.q.toLowerCase().includes(kw) || e.q.toLowerCase().includes(ext));
+          if (matches.length) return matches[Math.floor(Math.random() * matches.length)].a;
+        }
+      }
+      return null;
+    }
+
+    const QUIZ_BANK = [
+      ["What is the past tense of 'teach'?", "taught"],
+      ["What is the capital of Japan?", "Tokyo"],
+      ["Which is correct: 'She don\'t know' or 'She doesn\'t know'?", "She doesn't know"],
+      ["What does the word 'abundant' mean?", "plentiful / existing in large quantities"],
+      ["In Python, which keyword defines a function?", "def"],
+      ["In Arduino (.ino), which function runs repeatedly forever?", "loop"]
+    ];
+
+    function handleConversation(userText) {
+      const low = userText.toLowerCase().replace(/[^a-z0-9\s']/g, "").trim();
+      if (low.includes("first message") && history.some(([r]) => r === "user")) {
+        const first = history.find(([r]) => r === "user")[1];
+        return 'Your first message to me was: "' + first + '"';
+      }
+      if ((low.includes("last message") || low.includes("what did i say") || low.includes("what did i just say")) && history.some(([r]) => r === "user")) {
+        const users = history.filter(([r]) => r === "user");
+        return 'Your previous message was: "' + users[users.length - 1][1] + '"';
+      }
+      if (["how are you", "how r u", "hows it going", "how's it going"].some((p) => low.includes(p))) {
+        return "I'm doing great and ready to help! Ask me about English grammar, vocabulary, school facts, or .luau / .py / .ino code.";
+      }
+      if (["who are you", "what are you", "whats your name", "what's your name"].some((p) => low.includes(p))) {
+        return "I'm Lexis, a custom-built AI trained from scratch to help with English grammar, vocabulary, school facts, and .luau / .py / .ino coding.";
+      }
+      if (["who made you", "who created you", "who built you"].some((p) => low.includes(p))) {
+        return "You built and trained me from scratch—no ChatGPT or existing base AI models!";
+      }
+      if (["what can you do", "help me", "what do you do"].some((p) => low.includes(p)) || low === "help") {
+        return "I can define English words, fix grammar mistakes, answer science/geography/history facts, remember your name or notes, quiz you, and write .luau, .py, and .ino code!";
+      }
+      if (["thanks", "thank you", "thx", "ty", "cool", "nice", "awesome", "great", "ok", "okay", "bet"].includes(low)) {
+        return "Anytime! Want to try another question, a coding script, or type 'quiz me'?";
+      }
+      if (low.includes("quiz me") || low.includes("test me")) {
+        const [q] = QUIZ_BANK[Math.floor(Math.random() * QUIZ_BANK.length)];
+        return "Quick quiz: " + q + " (Type 'answer' if you want me to reveal it!)";
+      }
+      if (["answer", "reveal", "what is the answer", "whats the answer"].includes(low)) {
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i][0] === "assistant" && history[i][1].startsWith("Quick quiz: ")) {
+            const qPart = history[i][1].replace("Quick quiz: ", "").split(" (Type 'answer'")[0];
+            const found = QUIZ_BANK.find(([qq]) => qq === qPart);
+            if (found) return "The answer is: " + found[1];
+          }
+        }
+      }
+      return null;
+    }
+
+    async function generateReply(promptIds) {
+      const ids = promptIds.slice();
+      const generated = [];
+      const eosId = tokenizer.eosId;
+      const temperature = 0.15;
+      const topK = 5;
+      const repPenalty = 1.15;
+      const t0 = performance.now();
+      const confTrace = [];
+
+      for (let step = 0; step < MAX_NEW_TOKENS; step++) {
+        const cond = ids.slice(-MAX_SEQ_LEN);
+        const tensorData = BigInt64Array.from(cond.map((n) => BigInt(n)));
+        const inputTensor = new ort.Tensor("int64", tensorData, [1, cond.length]);
+
+        const outputs = await session.run({ input_ids: inputTensor });
+        const logitsTensor = outputs.logits;
+        const vocabSize = logitsTensor.dims[2];
+        const offset = (cond.length - 1) * vocabSize;
+        const nextLogits = new Float32Array(vocabSize);
+
+        for (let v = 0; v < vocabSize; v++) {
+          nextLogits[v] = logitsTensor.data[offset + v];
+        }
+
+        for (const tid of new Set(generated)) {
+          nextLogits[tid] = nextLogits[tid] > 0 ? nextLogits[tid] / repPenalty : nextLogits[tid] * repPenalty;
+        }
+
+        const indexed = [];
+        for (let v = 0; v < vocabSize; v++) indexed.push([nextLogits[v], v]);
+        indexed.sort((a, b) => b[0] - a[0]);
+        const top = indexed.slice(0, topK);
+
+        // Greedy argmax + softmax confidence tracking
+        let maxRaw = -Infinity;
+        for (let v = 0; v < vocabSize; v++) if (nextLogits[v] > maxRaw) maxRaw = nextLogits[v];
+        let fullSum = 0;
+        for (let v = 0; v < vocabSize; v++) fullSum += Math.exp(nextLogits[v] - maxRaw);
+        const chosen = top[0][1];
+        const chosenProb = Math.exp(top[0][0] - maxRaw) / (fullSum || 1);
+        confTrace.push(chosenProb);
+
+        ids.push(chosen);
+        generated.push(chosen);
+        if (chosen === eosId) break;
+      }
+
+      const elapsedSec = Math.max(0.01, (performance.now() - t0) / 1000);
+      const tps = (generated.length / elapsedSec).toFixed(1);
+      const avgConf = confTrace.reduce((a, b) => a + b, 0) / Math.max(1, confTrace.length);
+      const first3Min = confTrace.length ? Math.min(...confTrace.slice(0, 3)) : 0;
+      const decoded = tokenizer.decode(generated);
+      const safeText = (!decoded || avgConf < 0.60 || first3Min < 0.25)
+        ? "I'm not sure about that yet! Try asking me about English grammar, vocabulary, school facts, or .luau / .py / .ino code."
+        : decoded;
+      return { text: safeText, meta: `${generated.length} tokens · ${tps} tok/s` };
+    }
+
+    async function initModel() {
+      loadMemories();
+      try {
+        if (typeof ort === "undefined") throw new Error("ONNX Runtime failed to load.");
+        const tokRes = await fetch("./tokenizer.json");
+        if (!tokRes.ok) throw new Error("tokenizer.json not found");
+        tokenizer = new BrowserBPETokenizer(await tokRes.json());
+        session = await ort.InferenceSession.create("./birthmother.onnx");
+        try {
+          const kbRes = await fetch("./core_trained_backup.jsonl");
+          if (kbRes.ok) buildKBFromJsonl(await kbRes.text());
+        } catch (e) {}
+        modelReady = true;
+        statusText.textContent = "Online · Running in Browser";
+        statusPill.classList.add("ready");
+        appendMessage("bot", "Lexis AI is online! Ask me about English grammar, vocabulary, facts, or .luau / .py / .ino code.");
+      } catch (err) {
+        modelReady = false;
+        statusText.textContent = "Waiting for Model Files";
+        appendMessage(
+          "bot",
+          "Model files not found yet. Run 'python export_onnx.py --quantize' in your project folder, then upload index.html, tokenizer.json, and birthmother.onnx to Cloudflare Pages or GitHub Pages."
+        );
+      }
+    }
+
+
+    const GIBBERISH_LANGS = ["Zorgblaxian", "Keyboardian", "Gloop-Speak", "Bleep-Blorpish", "Quackinese"];
+    function isGibberish(text) {
+      const s = text.trim();
+      if (s.length < 4) return false;
+      if (/^(.)\1{3,}$/i.test(s)) return true;
+      const letters = s.replace(/[^a-zA-Z]/g, "");
+      const symbolsAndDigits = s.replace(/[a-zA-Z\s.,!?'"()-]/g, "");
+      if (symbolsAndDigits.length / s.length >= 0.45 && !/[=+\-*/^]/.test(s)) return true;
+      if (letters.length >= 6) {
+        const vowels = (letters.match(/[aeiouyAEIOUY]/g) || []).length;
+        if (vowels / letters.length < 0.14) return true;
+        if (/[bcdfghjklmnpqrstvwxz]{6,}/i.test(letters)) return true;
+      }
+      return false;
+    }
+
+    function makeGibberishReply() {
+      const lang = GIBBERISH_LANGS[Math.floor(Math.random() * GIBBERISH_LANGS.length)];
+      const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%&*?~^";
+      const len = 28 + Math.floor(Math.random() * 24);
+      let noise = "";
+      for (let i = 0; i < len; i++) {
+        if (i > 0 && i % 7 === 0) noise += " ";
+        noise += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return "Attempting Translation to " + lang + "...\n" + noise;
+    }
+
+    async function handleSend(overrideText = null) {
+      const text = (overrideText !== null ? overrideText : userInput.value).trim();
+      if (!text) return;
+
+      if (overrideText === null) {
+        userInput.value = "";
+        userInput.style.height = "auto";
+      }
+
+      appendMessage("user", text);
+
+      if (isGibberish(text)) {
+        const gibReply = makeGibberishReply();
+        appendMessage("bot", gibReply, "gibberish translator");
+        return;
+      }
+
+      if (!modelReady) {
+        appendMessage("bot", "Message Input Received... No AI Connected (upload tokenizer.json & birthmother.onnx alongside index.html).");
+        return;
+      }
+
+      const mems = loadMemories();
+      const newMem = extractMemory(text);
+      if (newMem && !mems.includes(newMem)) {
+        mems.push(newMem);
+        saveMemories(mems);
+        appendMessage("bot", "Got it—I'll remember that!", "memory saved");
+        history.push(["user", text], ["assistant", "Got it—I'll remember that!"]);
+        return;
+      }
+
+      const low = text.toLowerCase();
+      if ((low.includes("what is my name") || low.includes("who am i")) && mems.some((m) => m.includes("The user's name is "))) {
+        const nameFact = mems.filter((m) => m.includes("The user's name is ")).pop();
+        const nameVal = nameFact.replace("The user's name is ", "").replace(/\.$/, "");
+        const reply = "Your name is " + nameVal + ".";
+        appendMessage("bot", reply, "instant memory");
+        history.push(["user", text], ["assistant", reply]);
+        return;
+      }
+
+      const convReply = handleConversation(text);
+      if (convReply) {
+        appendMessage("bot", convReply, "instant");
+        history.push(["user", text], ["assistant", convReply]);
+        return;
+      }
+
+      const kbReply = searchKB(text);
+      if (kbReply) {
+        appendMessage("bot", kbReply, "knowledge base");
+        history.push(["user", text], ["assistant", kbReply]);
+        return;
+      }
+
+      const sysTag = mems.length ? SHORT_SYSTEM_TAG + " | Memory: " + mems.slice(-5).join(" ") : SHORT_SYSTEM_TAG;
+      history.push(["user", text]);
+
+      const maxPrompt = MAX_SEQ_LEN - MAX_NEW_TOKENS;
+      let promptIds = tokenizer.encodePrompt(sysTag, history);
+      while (promptIds.length > maxPrompt && history.length > 1) {
+        history.shift();
+        promptIds = tokenizer.encodePrompt(sysTag, history);
+      }
+
+      sendBtn.disabled = true;
+      const thinkingCard = appendMessage("bot", "Generating...");
+      try {
+        const result = await generateReply(promptIds);
+        thinkingCard.remove();
+        appendMessage("bot", result.text || "(No output generated)", result.meta);
+        history.push(["assistant", result.text]);
+      } catch (e) {
+        thinkingCard.remove();
+        appendMessage("bot", "Error generating response: " + e.message);
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
+    themeBtn.addEventListener("click", () => {
+      const html = document.documentElement;
+      const next = html.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      html.setAttribute("data-theme", next);
+      themeBtn.textContent = next === "dark" ? "Light Mode" : "Dark Mode";
+    });
+
+    chatForm.addEventListener("submit", (e) => { e.preventDefault(); handleSend(); });
+    userInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    });
+    userInput.addEventListener("input", () => {
+      userInput.style.height = "auto";
+      userInput.style.height = Math.min(userInput.scrollHeight, 140) + "px";
+    });
+
+    clearChatBtn.addEventListener("click", () => {
+      history = [];
+      chatLog.innerHTML = "";
+      appendMessage("bot", "Started a new chat. Ask me anything!");
+    });
+
+    forgetMemBtn.addEventListener("click", () => {
+      saveMemories([]);
+      showToast("Saved memory cleared.");
+    });
+
+    const menuBtn = document.getElementById("menuBtn");
+    const sidebar = document.querySelector("aside");
+    menuBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("open");
+    });
+
+    document.querySelectorAll(".prompt-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        sidebar.classList.remove("open");
+        handleSend(btn.getAttribute("data-prompt"));
+      });
+    });
+
+    initModel();
+  </script>
+</body>
+</html>
