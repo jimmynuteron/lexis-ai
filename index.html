@@ -298,6 +298,7 @@
           <div class="spec-row"><span>Architecture</span><span>6L · 6H · 384d</span></div>
           <div class="spec-row"><span>Tokenizer</span><span>Custom BPE (4K)</span></div>
           <div class="spec-row"><span>Saved Memory</span><span id="memCount">0 facts</span></div>
+          <div class="spec-row"><span>Knowledge Base</span><span id="kbCount">0 entries</span></div>
         </div>
       </div>
 
@@ -611,9 +612,7 @@
       return map;
     }
 
-    function buildKBFromJsonl(jsonlText) {
-      const seen = new Set();
-      kbEntries = [];
+    function appendKBFromJsonl(jsonlText, seen) {
       for (const line of jsonlText.split(/\r?\n/)) {
         if (!line.trim()) continue;
         try {
@@ -744,6 +743,45 @@
       return null;
     }
 
+
+    async function freeWebFallback(userText) {
+      const low = userText.toLowerCase().trim();
+      // 1. Dictionary lookup for "what does X mean" / "define X"
+      const mDef = low.match(/(?:what does|define|meaning of)\s+['"]?([a-z-]+)['"]?/);
+      if (mDef) {
+        const word = mDef[1];
+        try {
+          const r = await fetch("https://api.dictionaryapi.dev/api/v2/entries/en/" + encodeURIComponent(word));
+          if (r.ok) {
+            const data = await r.json();
+            const entry = data[0];
+            const m = entry.meanings && entry.meanings[0];
+            const d = m && m.definitions && m.definitions[0];
+            if (d && d.definition) {
+              return `'${word}' (${m.partOfSpeech || "word"}) means: ${d.definition}` + (d.example ? ` Example: "${d.example}"` : "");
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 2. Wikipedia summary lookup for general "what is X" / "who is X" / "tell me about X" or fallback word
+      const mWiki = low.match(/(?:what is|who is|who was|tell me about|what does)\s+['"]?([a-z0-9\s-]{2,40})['"]?(?:\s+mean)?\??$/);
+      const topic = mWiki ? mWiki[1].replace(/^(a|an|the)\s+/i, "").trim() : (mDef ? mDef[1] : "");
+      if (topic) {
+        try {
+          const r = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(topic.replace(/\s+/g, "_")));
+          if (r.ok) {
+            const data = await r.json();
+            if (data.extract) {
+              const sents = data.extract.split(/(?<=[.!?])\s+/).slice(0, 2).join(" ");
+              if (sents) return sents;
+            }
+          }
+        } catch (e) {}
+      }
+      return null;
+    }
+
     async function generateReply(promptIds) {
       const ids = promptIds.slice();
       const generated = [];
@@ -811,10 +849,16 @@
         if (!tokRes.ok) throw new Error("tokenizer.json not found");
         tokenizer = new BrowserBPETokenizer(await tokRes.json());
         session = await ort.InferenceSession.create("./birthmother.onnx");
-        try {
-          const kbRes = await fetch("./core_trained_backup.jsonl");
-          if (kbRes.ok) buildKBFromJsonl(await kbRes.text());
-        } catch (e) {}
+        const kbSeen = new Set();
+        kbEntries = [];
+        for (const kbFile of ["./core_trained_backup.jsonl", "./birthmother_training_data.jsonl"]) {
+          try {
+            const kbRes = await fetch(kbFile);
+            if (kbRes.ok) appendKBFromJsonl(await kbRes.text(), kbSeen);
+          } catch (e) {}
+        }
+        const kbCountEl = document.getElementById("kbCount");
+        if (kbCountEl) kbCountEl.textContent = kbEntries.length.toLocaleString() + " entries";
         modelReady = true;
         statusText.textContent = "Online · Running in Browser";
         statusPill.classList.add("ready");
@@ -928,9 +972,18 @@
       const thinkingCard = appendMessage("bot", "Generating...");
       try {
         const result = await generateReply(promptIds);
+        let finalText = result.text || "(No output generated)";
+        let finalMeta = result.meta;
+        if (finalText.startsWith("I'm not sure about that yet!")) {
+          const webAns = await freeWebFallback(text);
+          if (webAns) {
+            finalText = webAns;
+            finalMeta = "live dictionary/wiki";
+          }
+        }
         thinkingCard.remove();
-        appendMessage("bot", result.text || "(No output generated)", result.meta);
-        history.push(["assistant", result.text]);
+        appendMessage("bot", finalText, finalMeta);
+        history.push(["assistant", finalText]);
       } catch (e) {
         thinkingCard.remove();
         appendMessage("bot", "Error generating response: " + e.message);
